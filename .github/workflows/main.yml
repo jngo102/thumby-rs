@@ -49,7 +49,7 @@ jobs:
             upload_url: ${{ steps.create_release.outputs.upload_url }}
             asset_name: music.uf2
             asset_path: ./target/thumbv6m-none-eabi/release/examples/music.uf2
-            assset_content_type: application/octet-stream
+            asset_content_type: application/octet-stream
         - name: Publish to crates.io
           uses: katyo/publish-crates@v1
           with:
