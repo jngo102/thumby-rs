@@ -36,11 +36,11 @@ jobs:
           id: create_release
           uses: actions/create-release@v1
           env:
-              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           with:
               tag_name: ${{ steps.get_version.outputs.version }}
-              release_name: "thumby-rs v${{ steps.get_version.outputs.version }}"
-              body: "Example from library that plays Twinkle, Twinkle, Little Star on Thumby."
+              release_name: thumby-rs v${{ steps.get_version.outputs.version }}
+              body: Example from library that plays Twinkle, Twinkle, Little Star on Thumby
               draft: false
               prerelease: false
         - name: Upload release asset
@@ -50,6 +50,8 @@ jobs:
             asset_name: music.uf2
             asset_path: ./target/thumbv6m-none-eabi/release/examples/music.uf2
             asset_content_type: application/octet-stream
+          env:
+              GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         - name: Publish to crates.io
           uses: katyo/publish-crates@v1
           with:
