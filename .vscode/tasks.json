@@ -1,0 +1,89 @@
+{
+    "version": "2.0.0",
+    "inputs": [
+        {
+            "type": "pickString",
+            "id": "exampleName",
+            "description": "Which example would you like to run?",
+            "options": [
+                "graphics",
+                "music"
+            ],
+            "default": "music"
+        },
+        {
+            "type": "promptString",
+            "id": "thumbyLocation",
+            "description": "What drive is your Thumby mounted to (e.g. D:/)?",
+            "default": "E:/"
+        }
+    ],
+    "tasks": [
+        {
+            "label": "Build Debug",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build",
+                "--example",
+                "${input:exampleName}",
+                "--target",
+                "thumbv6m-none-eabi"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always"
+            },
+            "problemMatcher": "$rustc"
+        },
+        {
+            "label": "Build Release",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build",
+                "--example",
+                "${input:exampleName}",
+                "--target",
+                "thumbv6m-none-eabi",
+                "--release"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always"
+            },
+            "problemMatcher": "$rustc"
+        },
+        {
+            "label": "elf2uf2 Example",
+            "type": "shell",
+            "command": "elf2uf2-rs",
+            "args": [
+                "${workspaceFolder}/target/thumbv6m-none-eabi/release/examples/${input:exampleName}"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "dependsOn": "Build Release"
+        },
+        {
+            "label": "Deploy to Thumby",
+            "type": "shell",
+            "command": "cp",
+            "args": [
+                "${workspaceFolder}/target/thumbv6m-none-eabi/release/examples/${input:exampleName}.uf2",
+                "${input:thumbyLocation}"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "dependsOn": "elf2uf2 Example"
+        }
+    ]
+}
