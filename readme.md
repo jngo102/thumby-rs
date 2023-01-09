@@ -20,7 +20,6 @@ This is a Rust crate that may be used to interface with the [TinyCircuits Thumby
     - While continuing to hold the `down` button, power on your Thumby again.
     - Your Thumby should now be mounted on your system.
 4.  *Optional:* Install [Visual Studio Code](https://code.visualstudio.com/).
-    <!-- - Install the [rust-analyzer extension](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer). -->
 5.  Clone this repository:  
     <clipboard-copy class="btn btn-sm BtnGroup-item">
       `git clone https://github.com/jngo102/thumby-rs`
@@ -36,4 +35,4 @@ This is a Rust crate that may be used to interface with the [TinyCircuits Thumby
 2.  Open the cloned folder in an IDE.
 3.  In the `Cargo.toml` file, under `[dependencies]`, add `thumby = "^0"`.
 4.  You may now start importing thumby-rs modules to use in your game.
-<script type="module" src="./node_modules/@github/clipboard-copy-element/dist/index.js">
+5.  If you have Visual Studio Code, it is recommended to have the [rust-analyzer extension](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer) installed.
