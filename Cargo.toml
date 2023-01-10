@@ -9,7 +9,7 @@ keywords = ["thumby", "tiny-circuits", "rp2040", "embedded"]
 license = "Apache-2.0"
 name = "thumby"
 repository = "https://github.com/jngo102/thumby-rs"
-version = "0.0.1"
+version = "0.0.2"
 
 [badges]
 circle-ci = { repository = "jngo102/thumby-rs", branch = "main" }

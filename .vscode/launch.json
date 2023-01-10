@@ -1,0 +1,58 @@
+{
+    "version": "0.2.0",
+    "inputs": [
+        {
+            "type": "pickString",
+            "id": "exampleName",
+            "description": "Which example would you like to run?",
+            "options": [
+                "graphics",
+                "music"
+            ],
+            "default": "music"
+        },
+        {
+            "type": "pickString",
+            "id": "configuration",
+            "description": "Choose a configuration",
+            "default": "debug",
+            "options": [
+                "debug",
+                "release",
+            ]
+        }
+    ],
+    "configurations": [
+        {
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/target/thumbv6m-none-eabi/debug/examples/${input:exampleName}",
+            "name": "Pico Debug",
+            "request": "launch",
+            "type": "cortex-debug",
+            "gdbPath": "gdb-multiarch",
+            "gdbTarget": "localhost:3333",
+            "servertype": "openocd",
+            "configFiles": [
+                "interface/picoprobe.cfg",
+                "interface/cmsis-dap.cfg",
+                "target/rp2040.cfg"
+            ],
+            "searchDir": [],
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none",
+            "svdFile": "rp2040.svd",
+            "svdPath": "${env:PICO_SDK_PATH}/src/rp2040/hardware_regs/rp2040.svd",
+            "preLaunchTask": "Build Debug",
+            "preLaunchCommands": [
+                "monitor init",
+                "monitor reset init",
+                "monitor halt"
+            ],
+            "postRestartCommands": [
+                "break main",
+                "continue"
+            ]
+        }
+
+    ]
+}

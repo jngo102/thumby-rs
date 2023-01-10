@@ -15,16 +15,36 @@
             "type": "promptString",
             "id": "thumbyLocation",
             "description": "What drive is your Thumby mounted to (e.g. D:/)?",
-            "default": "E:/"
-        }
+            "default": "D:/"
+        },
     ],
     "tasks": [
         {
-            "label": "Build Debug",
+            "label": "1Debug",
             "type": "shell",
             "command": "cargo",
             "args": [
                 "build",
+                "--example",
+                "${input:exampleName}",
+                "--target",
+                "thumbv6m-none-eabi"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always"
+            },
+            "problemMatcher": "$rustc"
+        },
+        {
+            "label": "Run Debug",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
                 "--example",
                 "${input:exampleName}",
                 "--target",
@@ -61,7 +81,19 @@
             "problemMatcher": "$rustc"
         },
         {
-            "label": "elf2uf2 Example",
+            "label": "elf2uf2 Example (Debug)",
+            "type": "shell",
+            "command": "elf2uf2-rs",
+            "args": [
+                "${workspaceFolder}/target/thumbv6m-none-eabi/debug/examples/${input:exampleName}"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "dependsOn": "Build Debug"
+        },
+        {
+            "label": "elf2uf2 Example (Release)",
             "type": "shell",
             "command": "elf2uf2-rs",
             "args": [
@@ -83,7 +115,7 @@
             "problemMatcher": [
                 "$rustc"
             ],
-            "dependsOn": "elf2uf2 Example"
-        }
+            "dependsOn": "elf2uf2 Example (Release)"
+        },
     ]
 }

@@ -5,6 +5,7 @@ Cargo.lock
 target/
 
 *.log
+*.svd
 
 # editor files
 .vscode/*
