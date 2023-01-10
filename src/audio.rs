@@ -39,7 +39,6 @@ impl Audio {
         mut pwm: Slice<Pwm6, FreeRunning>,
         audio_pin: Pin<Gpio28, <Gpio28 as PinId>::Reset>,
     ) -> Self {
-        pwm.enable();
         pwm.set_div_frac(40);
         pwm.set_div_int(40);
         let channel = &mut pwm.channel_a;

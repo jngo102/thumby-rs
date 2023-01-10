@@ -1,13 +1,7 @@
 #![no_std]
 #![no_main]
 
-use cortex_m::asm;
-use thumby::Thumby;
-use embedded_graphics::{
-    pixelcolor::BinaryColor,
-    prelude::*,
-    primitives::{Circle, PrimitiveStyleBuilder},
-};
+use thumby::{color::Color, Thumby};
 // Ensure we halt the program on panic (if we don't mention this crate it won't
 // be linked)
 use panic_halt as _;
@@ -27,22 +21,20 @@ pub static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
 #[rp2040_hal::entry]
 fn main() -> ! {
     let mut thumby = Thumby::new();
+    thumby.audio.play(thumby::music::C);
+    thumby.wait_ms(500);
+    thumby.display.draw_filled_rectangle(16, 16, 72 - 32, 40 - 32, Color::DarkGray);
+    thumby.audio.play(thumby::music::D);
+    thumby.wait_ms(500);
+    thumby.display.draw_filled_rectangle(0, 0, 72, 40, Color::White);
+    thumby.audio.play(thumby::music::E);
+    thumby.wait_ms(500);
 
-    let style = PrimitiveStyleBuilder::new()
-        .stroke_width(1)
-        .stroke_color(BinaryColor::On)
-        .build();
-
-    for i in (4..88).step_by(4) {
-        Circle::new(Point::new(36 - i / 2, 20 - i / 2), i as u32)
-            .into_styled(style)
-            .draw(&mut thumby.display)
-            .unwrap();
-    }
-
-    thumby.display.flush().unwrap();
-
-     loop {
-        asm::wfe();
+    loop {
+        if thumby.input.a.pressed() || thumby.input.b.pressed() {
+            thumby.audio.play(thumby::music::C);
+        } else {
+            thumby.audio.stop();
+        }
     }
 }
