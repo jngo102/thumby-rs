@@ -25,6 +25,22 @@ const BUFF_INT_SZ: usize = BUFF_SZ / 4;
 
 static mut CORE1_STACK: Stack<STACK_SIZE> = Stack::new();
 
+static mut STATE: State = State {
+    thread: ThreadState::Stopped,
+    copy_buffers: 0,
+    pending_cmd: 0,
+    contrast: 0,
+    invert: false,
+};
+static mut BUFFER: [u8; BUFF_SZ] = [0; BUFF_SZ];
+static mut SHADING: [u8; BUFF_SZ] = [0; BUFF_SZ];
+static mut SUBFRAMES: [[u8; BUFF_SZ]; 3] = [[0; BUFF_SZ]; 3];
+static PRE_FRAME_CMDS: [u8; 4] = [0xA8, 0, 0xD3, 52];
+static POST_FRAME_CMDS: [u8; 4] = [0xD3, HEIGHT as u8 + (64 - 57), 0xA8, 57 - 1];
+static mut POST_FRAME_ADJ: [[u8; 2]; 3] = [[0x81, 0]; 3];
+static mut POST_FRAME_ADJ_SRC: [u8; 3] = [0; 3];
+static mut PENDING_CMDS: [u8; 8] = [0; 8];
+
 /// Module containing the data structure for the Thumby's display colors
 pub mod color {
     /// Data structure containing the color options for the Thumby's OLED display
@@ -41,7 +57,7 @@ pub mod color {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(PartialEq)]
 enum ThreadState {
     Stopped,
     Starting,
@@ -49,7 +65,6 @@ enum ThreadState {
     Stopping,
 }
 
-#[derive(Clone, Copy, Debug)]
 struct State {
     thread: ThreadState,
     copy_buffers: u8,
@@ -68,15 +83,6 @@ pub struct SSD1306 {
 
     initialised: bool,
     brightness: u32,
-    state: State,
-    buffer: [u8; BUFF_SZ],
-    shading: [u8; BUFF_SZ],
-    subframes: [[u8; BUFF_SZ]; 3],
-    pre_frame_cmds: [u8; 4],
-    post_frame_cmds: [u8; 4],
-    post_frame_adj: [[u8; 2]; 3],
-    post_frame_adj_src: [u8; 3],
-    pending_cmds: [u8; 8],
     last_update_end: Instant,
     frame_rate: u8,
 }
@@ -133,21 +139,6 @@ impl SSD1306 {
 
             initialised: false,
             brightness: 127,
-            state: State {
-                thread: ThreadState::Stopped,
-                copy_buffers: 0,
-                pending_cmd: 0,
-                contrast: 0,
-                invert: false,
-            },
-            buffer: [0; BUFF_SZ],
-            shading: [0; BUFF_SZ],
-            subframes: [[0; BUFF_SZ]; 3],
-            pre_frame_cmds: [0xA8, 0, 0xD3, 52],
-            post_frame_cmds: [0xD3, HEIGHT as u8 + (64 - 57), 0xA8, 57 - 1],
-            post_frame_adj: [[0x81, 0]; 3],
-            post_frame_adj_src: [0; 3],
-            pending_cmds: [0; 8],
             last_update_end,
             frame_rate: 60,
         }
@@ -166,15 +157,17 @@ impl SSD1306 {
         self.brightness(self.brightness);
         self.dc.set_low().unwrap();
         if self.initialised {
-            if self.state.thread == ThreadState::Stopped {
-                self.spi.write(&[0xA8, 0, 0xD3, 52]).unwrap();
-                self.delay.delay_us(FRAME_TIME_US * 3);
-                self.spi.write(&[0xA8, HEIGHT as u8 - 1, 0xD3, 0]).unwrap();
-                if self.state.invert {
-                    self.spi.write(&[0xA6 | 1]).unwrap();
+            unsafe {
+                if STATE.thread == ThreadState::Stopped {
+                    self.spi.write(&[0xA8, 0, 0xD3, 52]).unwrap();
+                    self.delay.delay_us(FRAME_TIME_US * 3);
+                    self.spi.write(&[0xA8, HEIGHT as u8 - 1, 0xD3, 0]).unwrap();
+                    if STATE.invert {
+                        self.spi.write(&[0xA6 | 1]).unwrap();
+                    }
+                } else {
+                    self.spi.write(&[0xAE, 0xA8, 0, 0xD3, 0, 0xAF]).unwrap();
                 }
-            } else {
-                self.spi.write(&[0xAE, 0xA8, 0, 0xD3, 0, 0xAF]).unwrap();
             }
             return;
         }
@@ -198,61 +191,36 @@ impl SSD1306 {
     }
 
     pub fn enable_grayscale(&mut self) {
-        if self.state.thread == ThreadState::Running {
+        if unsafe { STATE.thread == ThreadState::Running } {
             return;
         }
 
         let mut pac = unsafe { Peripherals::steal() };
         let mut sio = Sio::new(pac.SIO);
 
-        self.state.thread = ThreadState::Starting;
+        unsafe { STATE.thread = ThreadState::Starting };
         self.init();
 
-        let mut state = self.state.clone();
-        let buffer = self.buffer.clone();
-        let shading = self.shading.clone();
-        let mut subframes = self.subframes.clone();
-        let pre_frame_cmds = self.pre_frame_cmds.clone();
-        let post_frame_cmds = self.post_frame_cmds.clone();
-        let mut post_frame_adj = self.post_frame_adj.clone();
-        let post_frame_adj_src = self.post_frame_adj_src.clone();
-        let pending_cmds = self.pending_cmds.clone();
         let mut mc = Multicore::new(&mut pac.PSM, &mut pac.PPB, &mut sio.fifo);
         let core1 = &mut mc.cores()[1];
         core1
-            .spawn(unsafe { &mut CORE1_STACK.mem }, move || {
-                state.thread = ThreadState::Running;
-
-                loop {
-                    display_thread(
-                        &mut state,
-                        &buffer,
-                        &shading,
-                        &mut subframes,
-                        &pre_frame_cmds,
-                        &post_frame_cmds,
-                        &mut post_frame_adj,
-                        &post_frame_adj_src,
-                        &pending_cmds,
-                    );
-                }
-            })
+            .spawn(unsafe { &mut CORE1_STACK.mem }, display_thread)
             .unwrap();
 
-        // while self.state.thread != ThreadState::Running {
-        //     self.state = state;
-        //     self.subframes = subframes;
-        //     self.post_frame_adj = post_frame_adj;
+        // while unsafe { STATE.thread != ThreadState::Running } {
+        //     asm::wfe();
         // }
     }
 
     pub fn disable_grayscale(&mut self) {
-        if self.state.thread != ThreadState::Running {
-            return;
-        }
-        self.state.thread = ThreadState::Stopping;
-        while self.state.thread != ThreadState::Stopped {
-            asm::wfe();
+        unsafe {
+            if STATE.thread != ThreadState::Running {
+                return;
+            }
+            STATE.thread = ThreadState::Stopping;
+            while STATE.thread != ThreadState::Stopped {
+                asm::wfe();
+            }
         }
         self.init();
         self.show();
@@ -260,29 +228,31 @@ impl SSD1306 {
     }
 
     pub fn write_cmd(&mut self, cmd: &[u8]) {
-        if self.state.thread == ThreadState::Running {
-            if cmd.len() > self.pending_cmds.len() {
-                panic!(
-                    "Cannot send more than {} bytes using write_cmd()",
-                    self.pending_cmds.len()
-                );
+        unsafe {
+            if STATE.thread == ThreadState::Running {
+                if cmd.len() > PENDING_CMDS.len() {
+                    panic!(
+                        "Cannot send more than {} bytes using write_cmd()",
+                        PENDING_CMDS.len()
+                    );
+                }
+                let mut i = 0;
+                while i < cmd.len() {
+                    PENDING_CMDS[i] = cmd[i];
+                    i += 1;
+                }
+                while i < PENDING_CMDS.len() {
+                    PENDING_CMDS[i] = 0x3E;
+                    i += 1;
+                }
+                STATE.pending_cmd = 1;
+                // while STATE.pending_cmd > 0 {
+                //     asm::wfe();
+                // }
+            } else {
+                self.dc.set_low().unwrap();
+                self.spi.write(cmd).unwrap();
             }
-            let mut i = 0;
-            while i < cmd.len() {
-                self.pending_cmds[i] = cmd[i];
-                i += 1;
-            }
-            while i < self.pending_cmds.len() {
-                self.pending_cmds[i] = 0x3E;
-                i += 1;
-            }
-            self.state.pending_cmd = 1;
-            while self.state.pending_cmd > 0 {
-                asm::wfe();
-            }
-        } else {
-            self.dc.set_low().unwrap();
-            self.spi.write(cmd).unwrap();
         }
     }
 
@@ -295,31 +265,37 @@ impl SSD1306 {
     }
 
     pub fn invert(&mut self, invert: bool) {
-        self.state.invert = invert;
-        self.state.copy_buffers = 1;
-        let invert = if invert { 1 } else { 0 };
-        if self.state.thread != ThreadState::Running {
-            self.write_cmd(&[0xA6 | invert]);
+        unsafe {
+            STATE.invert = invert;
+            STATE.copy_buffers = 1;
+            let invert = if invert { 1 } else { 0 };
+            if STATE.thread != ThreadState::Running {
+                self.write_cmd(&[0xA6 | invert]);
+            }
         }
     }
 
     pub fn show(&mut self) {
-        if self.state.thread == ThreadState::Running {
-            self.state.copy_buffers = 1;
-            // while self.state.copy_buffers != 0 {
-            //     asm::wfe();
-            // }
-        } else {
-            self.dc.set_high().unwrap();
-            self.spi.write(&self.buffer).unwrap();
+        unsafe {
+            if STATE.thread == ThreadState::Running {
+                STATE.copy_buffers = 1;
+                // while STATE.copy_buffers != 0 {
+                //     asm::wfe();
+                // }
+            } else {
+                self.dc.set_high().unwrap();
+                self.spi.write(&BUFFER).unwrap();
+            }
         }
     }
 
     pub fn show_async(&mut self) {
-        if self.state.thread == ThreadState::Running {
-            self.state.copy_buffers = 1;
-        } else {
-            self.show();
+        unsafe {
+            if STATE.thread == ThreadState::Running {
+                STATE.copy_buffers = 1;
+            } else {
+                self.show();
+            }
         }
     }
 
@@ -346,19 +322,21 @@ impl SSD1306 {
             c = 127;
         }
         let cc = floor(sqrt(f64::from(c << 17))) as u32;
-        self.post_frame_adj_src[0] = (((cc * 30) >> 12) + 6) as u8;
-        self.post_frame_adj_src[1] = (((cc * 72) >> 12) + 14) as u8;
-        let c3 = (cc * 340 >> 12) + 20;
-        self.post_frame_adj_src[2] = if c3 < 255 { c3 as u8 } else { 255 };
+        unsafe {
+            POST_FRAME_ADJ_SRC[0] = (((cc * 30) >> 12) + 6) as u8;
+            POST_FRAME_ADJ_SRC[1] = (((cc * 72) >> 12) + 14) as u8;
+            let c3 = (cc * 340 >> 12) + 20;
+            POST_FRAME_ADJ_SRC[2] = if c3 < 255 { c3 as u8 } else { 255 };
 
-        if self.state.thread == ThreadState::Running {
-            self.state.contrast = 1;
-        } else {
-            self.post_frame_adj[0][1] = self.post_frame_adj_src[0];
-            self.post_frame_adj[1][1] = self.post_frame_adj_src[1];
-            self.post_frame_adj[2][1] = self.post_frame_adj_src[2];
-            self.write_cmd(&[0x81, c as u8]);
-            self.brightness = c;
+            if STATE.thread == ThreadState::Running {
+                STATE.contrast = 1;
+            } else {
+                POST_FRAME_ADJ[0][1] = POST_FRAME_ADJ_SRC[0];
+                POST_FRAME_ADJ[1][1] = POST_FRAME_ADJ_SRC[1];
+                POST_FRAME_ADJ[2][1] = POST_FRAME_ADJ_SRC[2];
+                self.write_cmd(&[0x81, c as u8]);
+                self.brightness = c;
+            }
         }
     }
 
@@ -367,8 +345,10 @@ impl SSD1306 {
         let f1 = if (color & 1) > 0 { 255 } else { 0 };
         let f2 = if (color & 2) > 0 { 255 } else { 0 };
         for i in 0..BUFF_INT_SZ {
-            self.buffer[i] = f1;
-            self.shading[i] = f2;
+            unsafe {
+                BUFFER[i] = f1;
+                SHADING[i] = f2;
+            }
         }
     }
 
@@ -414,15 +394,17 @@ impl SSD1306 {
         }
         let mut im = 255 - m;
         while o < oe {
-            if c1 {
-                self.buffer[o as usize] |= m as u8;
-            } else {
-                self.buffer[o as usize] &= im as u8;
-            }
-            if c2 {
-                self.shading[o as usize] |= m as u8;
-            } else {
-                self.shading[o as usize] &= im as u8;
+            unsafe {
+                if c1 {
+                    BUFFER[o as usize] |= m as u8;
+                } else {
+                    BUFFER[o as usize] &= im as u8;
+                }
+                if c2 {
+                    SHADING[o as usize] |= m as u8;
+                } else {
+                    SHADING[o as usize] &= im as u8;
+                }
             }
             o += 1;
         }
@@ -431,8 +413,10 @@ impl SSD1306 {
             o += strd;
             oe += WIDTH as u8;
             while o < oe {
-                self.buffer[o as usize] = v1;
-                self.shading[o as usize] = v2;
+                unsafe {
+                    BUFFER[o as usize] = v1;
+                    SHADING[o as usize] = v2;
+                }
                 o += 1;
             }
             height -= 8;
@@ -443,17 +427,19 @@ impl SSD1306 {
             m = (1 << height) - 1;
             im = 255 - m;
             while o < oe {
-                if c1 {
-                    self.buffer[o as usize] |= m as u8;
-                } else {
-                    self.buffer[o as usize] &= im as u8;
+                unsafe {
+                    if c1 {
+                        BUFFER[o as usize] |= m as u8;
+                    } else {
+                        BUFFER[o as usize] &= im as u8;
+                    }
+                    if c2 {
+                        SHADING[o as usize] |= m as u8;
+                    } else {
+                        SHADING[o as usize] &= im as u8;
+                    }
+                    o += 1;
                 }
-                if c2 {
-                    self.shading[o as usize] |= m as u8;
-                } else {
-                    self.shading[o as usize] &= im as u8;
-                }
-                o += 1;
             }
         }
     }
@@ -473,16 +459,18 @@ impl SSD1306 {
         let o = (y >> 3) * WIDTH + x;
         let m = 1 << (y & 7);
         let im = 255 - m;
-        if (color & 1) > 0 {
-            self.buffer[o] |= m;
-        } else {
-            self.buffer[o] &= im;
-        }
+        unsafe {
+            if (color & 1) > 0 {
+                BUFFER[o] |= m;
+            } else {
+                BUFFER[o] &= im;
+            }
 
-        if (color & 2) > 0 {
-            self.shading[o] |= m;
-        } else {
-            self.shading[o] &= im;
+            if (color & 2) > 0 {
+                SHADING[o] |= m;
+            } else {
+                SHADING[o] &= im;
+            }
         }
     }
 
@@ -524,15 +512,17 @@ impl SSD1306 {
             x1 += 1;
             while x != x1 {
                 if x < WIDTH as u8 && y < HEIGHT as u8 {
-                    if c1 > 0 {
-                        self.buffer[o as usize] |= m;
-                    } else {
-                        self.buffer[o as usize] &= im;
-                    }
-                    if c2 > 0 {
-                        self.shading[o as usize] |= m;
-                    } else {
-                        self.shading[o as usize] &= im;
+                    unsafe {
+                        if c1 > 0 {
+                            BUFFER[o as usize] |= m;
+                        } else {
+                            BUFFER[o as usize] &= im;
+                        }
+                        if c2 > 0 {
+                            SHADING[o as usize] |= m;
+                        } else {
+                            SHADING[o as usize] &= im;
+                        }
                     }
                 }
                 err -= dy;
@@ -556,15 +546,17 @@ impl SSD1306 {
             y1 += 1;
             while y != y1 {
                 if x < WIDTH as u8 && y < HEIGHT as u8 {
-                    if c1 > 0 {
-                        self.buffer[o as usize] |= m;
-                    } else {
-                        self.buffer[o as usize] &= im;
-                    }
-                    if c2 > 0 {
-                        self.shading[o as usize] |= m;
-                    } else {
-                        self.shading[o as usize] &= im;
+                    unsafe {
+                        if c1 > 0 {
+                            BUFFER[o as usize] |= m;
+                        } else {
+                            BUFFER[o as usize] &= im;
+                        }
+                        if c2 > 0 {
+                            SHADING[o as usize] |= m;
+                        } else {
+                            SHADING[o as usize] &= im;
+                        }
                     }
                 }
                 err -= dx;
@@ -591,124 +583,42 @@ impl SSD1306 {
     }
 }
 
-fn display_thread(
-    state: &mut State,
-    buffer: &[u8; BUFF_SZ],
-    shading: &[u8; BUFF_SZ],
-    subframes: &mut [[u8; BUFF_SZ]; 3],
-    pre_frame_cmds: &[u8; 4],
-    post_frame_cmds: &[u8; 4],
-    post_frame_adj: &mut [[u8; 2]; 3],
-    post_frame_adj_src: &[u8; 3],
-    pending_cmds: &[u8; 8],
-) {
-    let pac = unsafe { Peripherals::steal() };
-    let spi0 = pac.SPI0;
-    let sio = pac.SIO;
-    let tmr = pac.TIMER;
+fn display_thread() -> ! {
+    unsafe {
+        let pac = Peripherals::steal();
+        let spi0 = pac.SPI0;
+        let sio = pac.SIO;
+        let tmr = pac.TIMER;
 
-    let mut framebuffer = 0;
-    while framebuffer < 3 {
-        let mut time_out = tmr.timerawl.read().bits() + PRE_FRAME_TIME_US;
-        sio.gpio_out_xor.write(|w| unsafe { w.bits(1 << 17) });
-        let mut i = 0;
-        while i < 4 {
-            while (spi0.sspsr.read().bits() & 2) == 0 {}
-            spi0.sspdr
-                .write(|w| unsafe { w.bits(pre_frame_cmds[i].into()) });
-            i += 1;
-        }
-        while (spi0.sspsr.read().bits() & 4) == 4 {
-            // i = spi0.sspdr.read().bits() as usize;
-        }
-        while (spi0.sspsr.read().bits() & 0x10) == 0x10 {}
-        while (spi0.sspsr.read().bits() & 4) == 4 {
-            // i = spi0.sspdr.read().bits() as usize;
-        }
-
-        sio.gpio_out_clr.write(|w| unsafe { w.bits(1 << 17) });
-        i = 0;
-        let spibuff = subframes[framebuffer];
-        while i < 360 {
-            while (spi0.sspsr.read().bits() & 2) == 0 {}
-            spi0.sspdr.write(|w| unsafe { w.bits(spibuff[i] as u32) });
-            i += 1;
-        }
-        while (spi0.sspsr.read().bits() & 4) == 4 {
-            // i = spi0.sspdr.read().bits() as usize;
-        }
-        while (spi0.sspsr.read().bits() & 0x10) == 0x10 {}
-        while (spi0.sspsr.read().bits() & 4) == 4 {
-            // i = spi0.sspdr.read().bits() as usize;
-        }
-
-        sio.gpio_out_xor.write(|w| unsafe { w.bits(1 << 17) });
-        i = 0;
-        let spibuff = post_frame_adj[framebuffer];
-        while i < 2 {
-            while (spi0.sspsr.read().bits() & 2) == 0 {}
-            spi0.sspdr.write(|w| unsafe { w.bits(spibuff[i].into()) });
-            i += 1;
-        }
-        while (spi0.sspsr.read().bits() & 4) == 4 {
-            // i = spi0.sspdr.read().bits() as usize;
-        }
-        while (spi0.sspsr.read().bits() & 0x10) == 0x10 {}
-        while (spi0.sspsr.read().bits() & 4) == 4 {
-            // i = spi0.sspdr.read().bits() as usize;
-        }
-
-        while tmr.timerawl.read().bits() < time_out {}
-
-        time_out = tmr.timerawl.read().bits() + FRAME_TIME_US;
-
-        i = 0;
-        while i < 4 {
-            while (spi0.sspsr.read().bits() & 2) == 0 {}
-            spi0.sspdr
-                .write(|w| unsafe { w.bits(post_frame_cmds[i].into()) });
-            i += 1;
-        }
-        i = 0;
-        let spibuff = post_frame_adj[framebuffer];
-        while i < 2 {
-            while (spi0.sspsr.read().bits() & 2) == 0 {}
-            spi0.sspdr.write(|w| unsafe { w.bits(spibuff[i].into()) });
-            i += 1;
-        }
-        while (spi0.sspsr.read().bits() & 4) == 4 {
-            // i = spi0.sspdr.read().bits() as usize;
-        }
-        while (spi0.sspsr.read().bits() & 0x10) == 0x10 {}
-        while (spi0.sspsr.read().bits() & 4) == 4 {
-            // i = spi0.sspdr.read().bits() as usize;
-        }
-
-        if framebuffer == 2 {
-            if state.copy_buffers != 0 {
-                i = 0;
-                let inv = if state.invert { -1 } else { 0 };
-                while i < BUFF_INT_SZ {
-                    let v1 = buffer[i] as i8 ^ inv;
-                    let v2 = shading[i] as i8;
-                    subframes[0][i] = (v1 | v2) as u8;
-                    subframes[1][i] = v1 as u8;
-                    subframes[2][i] = (v1 & (v1 ^ v2)) as u8;
-                    i += 1;
-                }
-                state.copy_buffers = 0;
+        STATE.thread = ThreadState::Running;
+        {
+            let mut pac = Peripherals::steal();
+            let sio = Sio::new(pac.SIO);
+            let pins = Pins::new(
+                pac.IO_BANK0,
+                pac.PADS_BANK0,
+                sio.gpio_bank0,
+                &mut pac.RESETS,
+            );
+            let pwm_slices = rp2040_hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+            let mut pwm = pwm_slices.pwm6;
+            pwm.enable();
+            let mut audio = crate::audio::Audio::new(pwm, pins.gpio28);
+            if STATE.thread != ThreadState::Running {
+                audio.play(crate::music::C);
+            } else {
+                audio.play(crate::music::B);
             }
-            if state.contrast != 0 {
-                post_frame_adj[0][1] = post_frame_adj_src[0];
-                post_frame_adj[1][1] = post_frame_adj_src[1];
-                post_frame_adj[2][1] = post_frame_adj_src[2];
-                state.contrast = 0;
-            } else if state.pending_cmd != 0 {
-                i = 0;
-                while i < 8 {
+        }
+        while STATE.thread == ThreadState::Running {
+            let mut framebuffer = 0;
+            while framebuffer < 3 {
+                let mut time_out = tmr.timerawl.read().bits() + PRE_FRAME_TIME_US;
+                sio.gpio_out_xor.write(|w| w.bits(1 << 17));
+                let mut i = 0;
+                while i < 4 {
                     while (spi0.sspsr.read().bits() & 2) == 0 {}
-                    spi0.sspdr
-                        .write(|w| unsafe { w.bits(pending_cmds[i].into()) });
+                    spi0.sspdr.write(|w| w.bits(PRE_FRAME_CMDS[i].into()));
                     i += 1;
                 }
                 while (spi0.sspsr.read().bits() & 4) == 4 {
@@ -718,12 +628,111 @@ fn display_thread(
                 while (spi0.sspsr.read().bits() & 4) == 4 {
                     // i = spi0.sspdr.read().bits() as usize;
                 }
-                state.pending_cmd = 0;
+
+                sio.gpio_out_clr.write(|w| w.bits(1 << 17));
+                i = 0;
+                let spibuff = SUBFRAMES[framebuffer];
+                while i < 360 {
+                    while (spi0.sspsr.read().bits() & 2) == 0 {}
+                    spi0.sspdr.write(|w| w.bits(spibuff[i] as u32));
+                    i += 1;
+                }
+                while (spi0.sspsr.read().bits() & 4) == 4 {
+                    // i = spi0.sspdr.read().bits() as usize;
+                }
+                while (spi0.sspsr.read().bits() & 0x10) == 0x10 {}
+                while (spi0.sspsr.read().bits() & 4) == 4 {
+                    // i = spi0.sspdr.read().bits() as usize;
+                }
+
+                sio.gpio_out_xor.write(|w| w.bits(1 << 17));
+                i = 0;
+                let spibuff = POST_FRAME_ADJ[framebuffer];
+                while i < 2 {
+                    while (spi0.sspsr.read().bits() & 2) == 0 {}
+                    spi0.sspdr.write(|w| w.bits(spibuff[i].into()));
+                    i += 1;
+                }
+                while (spi0.sspsr.read().bits() & 4) == 4 {
+                    // i = spi0.sspdr.read().bits() as usize;
+                }
+                while (spi0.sspsr.read().bits() & 0x10) == 0x10 {}
+                while (spi0.sspsr.read().bits() & 4) == 4 {
+                    // i = spi0.sspdr.read().bits() as usize;
+                }
+
+                while tmr.timerawl.read().bits() < time_out {}
+
+                time_out = tmr.timerawl.read().bits() + FRAME_TIME_US;
+
+                i = 0;
+                while i < 4 {
+                    while (spi0.sspsr.read().bits() & 2) == 0 {}
+                    spi0.sspdr.write(|w| w.bits(POST_FRAME_CMDS[i].into()));
+                    i += 1;
+                }
+                i = 0;
+                let spibuff = POST_FRAME_ADJ[framebuffer];
+                while i < 2 {
+                    while (spi0.sspsr.read().bits() & 2) == 0 {}
+                    spi0.sspdr.write(|w| w.bits(spibuff[i].into()));
+                    i += 1;
+                }
+                while (spi0.sspsr.read().bits() & 4) == 4 {
+                    // i = spi0.sspdr.read().bits() as usize;
+                }
+                while (spi0.sspsr.read().bits() & 0x10) == 0x10 {}
+                while (spi0.sspsr.read().bits() & 4) == 4 {
+                    // i = spi0.sspdr.read().bits() as usize;
+                }
+
+                if framebuffer == 2 {
+                    if STATE.copy_buffers != 0 {
+                        i = 0;
+                        let inv = if STATE.invert { -1 } else { 0 };
+                        while i < BUFF_INT_SZ {
+                            let v1 = BUFFER[i] as i8 ^ inv;
+                            let v2 = SHADING[i] as i8;
+                            SUBFRAMES[0][i] = (v1 | v2) as u8;
+                            SUBFRAMES[1][i] = v1 as u8;
+                            SUBFRAMES[2][i] = (v1 & (v1 ^ v2)) as u8;
+                            i += 1;
+                        }
+                        STATE.copy_buffers = 0;
+                    }
+                    if STATE.contrast != 0 {
+                        POST_FRAME_ADJ[0][1] = POST_FRAME_ADJ_SRC[0];
+                        POST_FRAME_ADJ[1][1] = POST_FRAME_ADJ_SRC[1];
+                        POST_FRAME_ADJ[2][1] = POST_FRAME_ADJ_SRC[2];
+                        STATE.contrast = 0;
+                    } else if STATE.pending_cmd != 0 {
+                        i = 0;
+                        while i < 8 {
+                            while (spi0.sspsr.read().bits() & 2) == 0 {}
+                            spi0.sspdr.write(|w| w.bits(PENDING_CMDS[i].into()));
+                            i += 1;
+                        }
+                        while (spi0.sspsr.read().bits() & 4) == 4 {
+                            // i = spi0.sspdr.read().bits() as usize;
+                        }
+                        while (spi0.sspsr.read().bits() & 0x10) == 0x10 {}
+                        while (spi0.sspsr.read().bits() & 4) == 4 {
+                            // i = spi0.sspdr.read().bits() as usize;
+                        }
+                        STATE.pending_cmd = 0;
+                    }
+                }
+
+                while tmr.timerawl.read().bits() < time_out {}
+
+                framebuffer += 1;
             }
         }
 
-        while tmr.timerawl.read().bits() < time_out {}
+        STATE.thread = ThreadState::Stopped;
+    }
 
-        framebuffer += 1;
+    loop {
+        asm::wfe();
     }
 }
