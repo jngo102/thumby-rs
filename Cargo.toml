@@ -22,13 +22,15 @@ cortex-m = "^0"
 cortex-m-rt = "^0"
 embedded-hal = { version = "^0", features = ["unproven"] }
 fugit = "^0"
-panic-probe = { version = "^0", features = ["print-rtt"] }
+# panic-probe = { version = "^0", features = ["print-rtt"] }
 
 # If you're not going to use a Board Support Package you'll need these:
 rp2040-hal = { version = "^0", features = ["rt"] }
 rp2040-boot2 = "^0"
 
-panic-halt = "^0"
+# panic-halt = "^0"
+cortex-m-semihosting = "^0"
+panic-semihosting = "^0"
 libm = "^0"
 
 [dev-dependencies]

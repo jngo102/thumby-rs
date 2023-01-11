@@ -40,8 +40,7 @@
             "searchDir": [],
             "runToEntryPoint": "main",
             "showDevDebugOutput": "none",
-            "svdFile": "rp2040.svd",
-            "svdPath": "${env:PICO_SDK_PATH}/src/rp2040/hardware_regs/rp2040.svd",
+            "svdFile": "${env:PICO_SDK_PATH}/src/rp2040/hardware_regs/rp2040.svd",
             "preLaunchTask": "Build Debug",
             "preLaunchCommands": [
                 "monitor init",

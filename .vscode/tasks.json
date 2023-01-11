@@ -20,7 +20,7 @@
     ],
     "tasks": [
         {
-            "label": "1Debug",
+            "label": "Build Debug",
             "type": "shell",
             "command": "cargo",
             "args": [

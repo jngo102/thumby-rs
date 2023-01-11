@@ -4,7 +4,7 @@
 use thumby::{color::Color, Thumby};
 // Ensure we halt the program on panic (if we don't mention this crate it won't
 // be linked)
-use panic_halt as _;
+// use panic_halt as _;
 
 /// The linker will place this boot block at the start of our program image. We
 /// need this to help the ROM bootloader get our code up and running.

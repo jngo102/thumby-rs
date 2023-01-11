@@ -207,9 +207,9 @@ impl SSD1306 {
             .spawn(unsafe { &mut CORE1_STACK.mem }, display_thread)
             .unwrap();
 
-        // while unsafe { STATE.thread != ThreadState::Running } {
-        //     asm::wfe();
-        // }
+        while unsafe { STATE.thread != ThreadState::Running } {
+            asm::wfe();
+        }
     }
 
     pub fn disable_grayscale(&mut self) {
@@ -246,9 +246,9 @@ impl SSD1306 {
                     i += 1;
                 }
                 STATE.pending_cmd = 1;
-                // while STATE.pending_cmd > 0 {
-                //     asm::wfe();
-                // }
+                while STATE.pending_cmd > 0 {
+                    asm::wfe();
+                }
             } else {
                 self.dc.set_low().unwrap();
                 self.spi.write(cmd).unwrap();
@@ -279,9 +279,9 @@ impl SSD1306 {
         unsafe {
             if STATE.thread == ThreadState::Running {
                 STATE.copy_buffers = 1;
-                // while STATE.copy_buffers != 0 {
-                //     asm::wfe();
-                // }
+                while STATE.copy_buffers != 0 {
+                    asm::wfe();
+                }
             } else {
                 self.dc.set_high().unwrap();
                 self.spi.write(&BUFFER).unwrap();

@@ -21,6 +21,8 @@ mod input;
 mod ssd1306;
 
 use audio::Audio;
+use core::panic::PanicInfo;
+use cortex_m_semihosting::dbg;
 use input::Input;
 use rp2040_hal::{
     gpio::{FunctionSpi, Pins},
@@ -108,4 +110,10 @@ impl Thumby {
         self.display.update();
         self.input.update();
     }
+}
+
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    dbg!("PANICKED! Error: {:?}", info);
+    loop {}
 }

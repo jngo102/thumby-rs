@@ -1,5 +1,11 @@
 name: Publish
-on: [push, pull_request]
+on: 
+  push:
+    branches:
+      - bw
+  pull_request:
+    branches:
+      - bw
 
 jobs:
     publish:
